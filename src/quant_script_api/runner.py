@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 import signal
+import sqlite3
 import sys
 import uuid
 from typing import Any
@@ -52,12 +54,149 @@ class RunRecord:
 
 
 class RunManager:
-    def __init__(self, *, scripts_root: Path, logs_dir: Path, terminate_timeout_seconds: int = 10):
+
+    def __init__(
+        self,
+        *,
+        scripts_root: Path,
+        logs_dir: Path,
+        state_dir: Path,
+        terminate_timeout_seconds: int = 10,
+    ):
         self._scripts_root = scripts_root.expanduser().resolve()
         self._logs_dir = logs_dir.expanduser()
+        self._state_dir = state_dir.expanduser()
         self._terminate_timeout_seconds = max(1, int(terminate_timeout_seconds))
         self._runs: dict[str, RunRecord] = {}
         self._lock = asyncio.Lock()
+
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        self._db_path = self._state_dir / "runs.db"
+        self._init_db()
+        self._load_runs()
+
+    def _init_db(self) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS runs (
+                    run_id TEXT PRIMARY KEY,
+                    script TEXT,
+                    argv TEXT,
+                    status TEXT,
+                    pid INTEGER,
+                    return_code INTEGER,
+                    created_at TEXT,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    stdout_path TEXT,
+                    stderr_path TEXT,
+                    error TEXT
+                )
+            """
+            )
+            conn.commit()
+
+    def _load_runs(self) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM runs")
+            for row in cursor:
+                record = RunRecord(
+                    run_id=row["run_id"],
+                    script=row["script"],
+                    argv=json.loads(row["argv"]),
+                    status=row["status"],
+                    pid=row["pid"],
+                    return_code=row["return_code"],
+                    created_at=row["created_at"],
+                    started_at=row["started_at"],
+                    finished_at=row["finished_at"],
+                    stdout_path=Path(row["stdout_path"]),
+                    stderr_path=Path(row["stderr_path"]),
+                    error=row["error"],
+                )
+
+                # Check if process is still alive
+                if record.status in ("starting", "running", "stopping") and record.pid:
+                    if self._is_process_alive(record.pid):
+                        # It's alive! Start watching it
+                        asyncio.create_task(
+                            self._watch_orphaned_run(record.run_id, record.pid)
+                        )
+                    else:
+                        # It's dead
+                        record.status = "terminated"
+                        if not record.finished_at:
+                            record.finished_at = _utc_now()
+                        record.error = (
+                            f"{record.error}\nServer restarted and process not found"
+                            if record.error
+                            else "Server restarted and process not found"
+                        )
+                        self._save_run_sync(record)
+                elif record.status in ("starting", "running", "stopping"):
+                    # No PID recorded, mark as terminated
+                    record.status = "terminated"
+                    if not record.finished_at:
+                        record.finished_at = _utc_now()
+                    record.error = (
+                        f"{record.error}\nServer restarted"
+                        if record.error
+                        else "Server restarted"
+                    )
+                    self._save_run_sync(record)
+
+                self._runs[record.run_id] = record
+
+    def _is_process_alive(self, pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    async def _watch_orphaned_run(self, run_id: str, pid: int) -> None:
+        while True:
+            if not self._is_process_alive(pid):
+                async with self._lock:
+                    record = self._runs.get(run_id)
+                    if record and record.status not in (
+                        "stopped",
+                        "succeeded",
+                        "failed",
+                    ):
+                        record.status = "terminated"
+                        record.finished_at = _utc_now()
+                        self._save_run_sync(record)
+                break
+            await asyncio.sleep(1)
+
+    def _save_run_sync(self, record: RunRecord) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO runs (
+                    run_id, script, argv, status, pid, return_code,
+                    created_at, started_at, finished_at, stdout_path, stderr_path, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    record.run_id,
+                    record.script,
+                    json.dumps(record.argv),
+                    record.status,
+                    record.pid,
+                    record.return_code,
+                    record.created_at,
+                    record.started_at,
+                    record.finished_at,
+                    str(record.stdout_path),
+                    str(record.stderr_path),
+                    record.error,
+                ),
+            )
+            conn.commit()
 
     async def start(
         self,
@@ -93,6 +232,7 @@ class RunManager:
 
         async with self._lock:
             self._runs[run_id] = record
+        self._save_run_sync(record)
 
         full_env = os.environ.copy()
         if env:
@@ -115,11 +255,11 @@ class RunManager:
             )
         except Exception as e:
             stdout_file.close()
-            stderr_file.close()
             async with self._lock:
                 record.status = "failed"
                 record.error = str(e)
                 record.finished_at = _utc_now()
+            self._save_run_sync(record)
             return record
 
         async with self._lock:
@@ -129,6 +269,7 @@ class RunManager:
             record.pid = proc.pid
             record.status = "running"
             record.started_at = _utc_now()
+        self._save_run_sync(record)
 
         asyncio.create_task(self._watch(run_id))
         return record
@@ -147,6 +288,7 @@ class RunManager:
                 record.status = "failed"
                 record.error = str(e)
                 record.finished_at = _utc_now()
+            self._save_run_sync(record)
             self._close_files(record)
             return
 
@@ -159,6 +301,7 @@ class RunManager:
                 record.status = "succeeded"
             else:
                 record.status = "failed"
+        self._save_run_sync(record)
         self._close_files(record)
 
     def _close_files(self, record: RunRecord) -> None:
@@ -175,6 +318,14 @@ class RunManager:
         async with self._lock:
             return [r.to_public() for r in self._runs.values()]
 
+    async def list_active_runs(self) -> list[dict[str, Any]]:
+        async with self._lock:
+            return [
+                r.to_public()
+                for r in self._runs.values()
+                if r.status in ("starting", "running", "stopping")
+            ]
+
     async def get(self, run_id: str) -> RunRecord | None:
         async with self._lock:
             return self._runs.get(run_id)
@@ -184,39 +335,86 @@ class RunManager:
             record = self._runs.get(run_id)
             if record is None:
                 return None
-            proc = record._process
-            if proc is None or record.status not in {"running", "starting"}:
+
+            if record.status not in {"running", "starting"}:
                 return record
+
             record.status = "stopping"
+            proc = record._process
+            pid = record.pid
 
-        try:
-            if os.name != "nt":
-                os.killpg(proc.pid, signal.SIGTERM)
-            else:
-                proc.terminate()
-        except ProcessLookupError:
-            return record
-        except Exception as e:
-            async with self._lock:
-                record.status = "failed"
-                record.error = str(e)
-            return record
+        self._save_run_sync(record)
 
-        try:
-            rc = await asyncio.wait_for(proc.wait(), timeout=self._terminate_timeout_seconds)
-        except asyncio.TimeoutError:
+        if proc:
             try:
                 if os.name != "nt":
-                    os.killpg(proc.pid, signal.SIGKILL)
+                    os.killpg(proc.pid, signal.SIGTERM)
                 else:
-                    proc.kill()
-            except Exception:
+                    proc.terminate()
+            except ProcessLookupError:
+                return record
+            except Exception as e:
+                async with self._lock:
+                    record.status = "failed"
+                    record.error = str(e)
+                self._save_run_sync(record)
+                return record
+
+            try:
+                rc = await asyncio.wait_for(
+                    proc.wait(), timeout=self._terminate_timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                try:
+                    if os.name != "nt":
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                except Exception:
+                    pass
+            else:
+                async with self._lock:
+                    record.return_code = rc
+                    record.finished_at = _utc_now()
+                    record.status = "stopped"
+                self._save_run_sync(record)
+
+            return record
+
+        elif pid:
+            try:
+                if os.name != "nt":
+                    os.killpg(pid, signal.SIGTERM)
+                else:
+                    os.kill(pid, signal.SIGTERM)
+            except OSError:
                 pass
-        else:
-            async with self._lock:
-                record.return_code = rc
-                record.finished_at = _utc_now()
-                record.status = "stopped"
+
+            start_time = asyncio.get_running_loop().time()
+            while True:
+                if not self._is_process_alive(pid):
+                    break
+                if (
+                    asyncio.get_running_loop().time() - start_time
+                    > self._terminate_timeout_seconds
+                ):
+                    try:
+                        if os.name != "nt":
+                            os.killpg(pid, signal.SIGKILL)
+                        else:
+                            os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                    break
+                await asyncio.sleep(0.1)
+
+            if not self._is_process_alive(pid):
+                async with self._lock:
+                    record.status = "stopped"
+                    record.finished_at = _utc_now()
+                self._save_run_sync(record)
+
+            return record
 
         return record
 

@@ -75,9 +75,7 @@ def load_settings(
     state_dir_path = Path(state_dir_raw).expanduser()
 
     logs_dir_raw = _env("SCRIPT_LOGS_DIR")
-    logs_dir_path = (
-        Path(logs_dir_raw).expanduser() if logs_dir_raw else (state_dir_path / "logs")
-    )
+    logs_dir_path = Path(logs_dir_raw).expanduser() if logs_dir_raw else Path("logs")
 
     resolved_host = host or (_env("SCRIPT_HOST", "127.0.0.1") or "127.0.0.1")
     resolved_port = port if port is not None else _env_int("SCRIPT_PORT", 8000)
@@ -116,4 +114,3 @@ def load_settings(
         jwt_admin_secret=jwt_admin_secret,
         terminate_timeout_seconds=terminate_timeout_seconds,
     )
-

@@ -40,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.runner = RunManager(
         scripts_root=settings.scripts_root,
         logs_dir=settings.logs_dir,
+        state_dir=settings.state_dir,
         terminate_timeout_seconds=settings.terminate_timeout_seconds,
     )
     app.state.scripts = {s.path: s for s in scan_scripts(settings.scripts_root)}
@@ -78,6 +79,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def rescan_scripts() -> dict[str, Any]:
         app.state.scripts = {s.path: s for s in scan_scripts(settings.scripts_root)}
         return {"count": len(app.state.scripts)}
+
+    @app.get(f"{settings.api_prefix}/runs", dependencies=[_auth({"scripts:read"})])
+    async def list_runs() -> dict[str, Any]:
+        runs = await app.state.runner.list_runs()
+        return {"count": len(runs), "runs": runs}
+
+    @app.get(
+        f"{settings.api_prefix}/runs/active", dependencies=[_auth({"scripts:read"})]
+    )
+    async def list_active_runs() -> dict[str, Any]:
+        runs = await app.state.runner.list_active_runs()
+        return {"count": len(runs), "runs": runs}
 
     @app.post(f"{settings.api_prefix}/runs", dependencies=[_auth({"scripts:run"})])
     async def start_run(req: RunRequest) -> dict[str, Any]:
