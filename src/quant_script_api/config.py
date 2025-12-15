@@ -40,8 +40,8 @@ class Settings:
 
     jwt_auth: bool
     jwt_secret: str | None
-    jwt_iss: str
-    jwt_aud: str
+    jwt_iss: str | None
+    jwt_aud: str | None
     jwt_leeway_seconds: int
     jwt_expire_seconds: int
     jwt_admin_secret: str | None
@@ -86,8 +86,8 @@ def load_settings(
         or _env("SCRIPT_JWT_SECRETE")  # common typo
         or None
     )
-    jwt_iss = _env("SCRIPT_JWT_ISS", "quant-script-api") or "quant-script-api"
-    jwt_aud = _env("SCRIPT_JWT_AUD", "quant-internal") or "quant-internal"
+    jwt_iss = _env("SCRIPT_JWT_ISS")
+    jwt_aud = _env("SCRIPT_JWT_AUD")
     jwt_leeway_seconds = _env_int("SCRIPT_JWT_LEEWAY_SECONDS", 30)
     jwt_expire_seconds = _env_int("SCRIPT_JWT_EXPIRE_SECONDS", _env_int("SCRIPT_JWT_EXPIRE", 3600))
     jwt_admin_secret = (

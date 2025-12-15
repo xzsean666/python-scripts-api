@@ -94,8 +94,6 @@ def issue_admin_token(settings: Settings, secret: str) -> dict[str, Any]:
     now = int(time.time())
     exp = now + int(settings.jwt_expire_seconds)
     payload = {
-        "iss": settings.jwt_iss,
-        "aud": settings.jwt_aud,
         "sub": "admin",
         "type": "admin",
         "role": "admin",
@@ -104,10 +102,14 @@ def issue_admin_token(settings: Settings, secret: str) -> dict[str, Any]:
         "exp": exp,
         "jti": str(uuid.uuid4()),
     }
+    if settings.jwt_iss:
+        payload["iss"] = settings.jwt_iss
+    if settings.jwt_aud:
+        payload["aud"] = settings.jwt_aud
+
     token = encode_hs256(payload, settings.jwt_secret)
     return {
         "access_token": token,
         "token_type": "Bearer",
         "expires_in": int(settings.jwt_expire_seconds),
     }
-
