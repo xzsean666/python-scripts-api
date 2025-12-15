@@ -18,6 +18,23 @@
 pip install quant-script-api
 ```
 
+从 GitHub 安装（适合未发布 PyPI 的场景）：
+
+```bash
+# 安装为项目依赖（写入 pyproject.toml）
+uv add "quant-script-api @ git+https://github.com/<OWNER>/<REPO>.git"
+
+# 或安装为全局工具（推荐用来跑服务）
+uv tool install "quant-script-api @ git+https://github.com/<OWNER>/<REPO>.git"
+```
+
+固定到 tag / commit：
+
+```bash
+uv add "quant-script-api @ git+https://github.com/<OWNER>/<REPO>.git@v0.1.0"
+# 或 @<commit_sha>
+```
+
 启动（指定脚本目录）：
 
 ```bash
