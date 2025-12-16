@@ -21,6 +21,10 @@ class RunRequest(BaseModel):
         default=None,
         description="Optional working directory relative to scripts root (default: scripts root)",
     )
+    duplicate: bool = Field(
+        default=False,
+        description="Allow multiple instances of the same script to run simultaneously",
+    )
 
 
 class AdminTokenRequest(BaseModel):
@@ -116,12 +120,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
                 )
 
-        record = await app.state.runner.start(
-            script=req.script,
-            absolute_script_path=absolute,
-            args=req.args,
-            env=req.env,
-            cwd=run_cwd,
+        if not req.duplicate:
+            active_runs = await app.state.runner.list_active_runs()
+            resolved_absolute_str = str(absolute)
+            for run in active_runs:
+                # Check if the absolute path matches (argv[2] is the script path)
+                if len(run["argv"]) > 2 and run["argv"][2] == resolved_absolute_str:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Script is already running. Set 'duplicate' to true to allow multiple instances.",
+    @app.get(
+        f"{settings.api_prefix}/runs/{{run_id}}", dependencies=[_auth({"scripts:read"})]
+    )       cwd=run_cwd,
         )
         return record.to_public()
 
