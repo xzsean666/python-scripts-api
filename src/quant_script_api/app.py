@@ -129,9 +129,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Script is already running. Set 'duplicate' to true to allow multiple instances.",
-    @app.get(
-        f"{settings.api_prefix}/runs/{{run_id}}", dependencies=[_auth({"scripts:read"})]
-    )       cwd=run_cwd,
+                    )
+
+        record = await app.state.runner.start(
+            script=req.script,
+            absolute_script_path=absolute,
+            args=req.args,
+            env=req.env,
+            cwd=run_cwd,
         )
         return record.to_public()
 
