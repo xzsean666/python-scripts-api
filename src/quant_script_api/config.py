@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 import os
 from pathlib import Path
 
@@ -37,9 +38,9 @@ class Settings:
     logs_dir: Path
     host: str
     port: int
-
     jwt_auth: bool
     jwt_secret: str | None
+    jwt_iss: str | None
     jwt_iss: str | None
     jwt_aud: str | None
     jwt_leeway_seconds: int
@@ -84,7 +85,7 @@ def load_settings(
     jwt_secret = (
         _env("SCRIPT_JWT_SECRET")
         or _env("SCRIPT_JWT_SECRETE")  # common typo
-        or None
+        or "default-jwt-secret"
     )
     jwt_iss = _env("SCRIPT_JWT_ISS")
     jwt_aud = _env("SCRIPT_JWT_AUD")
