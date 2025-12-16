@@ -12,6 +12,15 @@
 
 ### 安装与启动
 
+```
+
+uv add git+https://github.com/xzsean666/python-scripts-api.git
+
+uv run quant-script-api serve --scripts-path ./scripts
+```
+
+
+
 安装：
 
 ```bash
