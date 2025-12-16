@@ -27,6 +27,19 @@ class RunRequest(BaseModel):
     )
 
 
+class RunAllRequest(BaseModel):
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] | None = None
+    cwd: str | None = Field(
+        default=None,
+        description="Optional working directory relative to scripts root (default: scripts root)",
+    )
+    duplicate: bool = Field(
+        default=False,
+        description="Allow multiple instances of the same script to run simultaneously",
+    )
+
+
 class AdminTokenRequest(BaseModel):
     secret: str
 
@@ -144,6 +157,97 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def list_runs() -> dict[str, Any]:
         runs = await app.state.runner.list_runs()
         return {"count": len(runs), "runs": runs}
+
+    @app.post(f"{settings.api_prefix}/runs/all", dependencies=[_auth({"scripts:run"})])
+    async def run_all_scripts(req: RunAllRequest) -> dict[str, Any]:
+        scripts = list(app.state.scripts.values())
+        results = []
+
+        active_runs = []
+        if not req.duplicate:
+            active_runs = await app.state.runner.list_active_runs()
+
+        for s in scripts:
+            try:
+                absolute = resolve_script(settings.scripts_root, s.path)
+            except Exception:
+                results.append(
+                    {
+                        "script": s.path,
+                        "status": "error",
+                        "error": "Script resolution failed",
+                    }
+                )
+                continue
+
+            if not req.duplicate:
+                resolved_absolute_str = str(absolute)
+                is_running = False
+                for run in active_runs:
+                    if len(run["argv"]) > 2 and run["argv"][2] == resolved_absolute_str:
+                        is_running = True
+                        break
+                if is_running:
+                    results.append(
+                        {
+                            "script": s.path,
+                            "status": "skipped",
+                            "reason": "Already running",
+                        }
+                    )
+                    continue
+
+            run_cwd: Path | None = None
+            if req.cwd:
+                try:
+                    run_cwd = (settings.scripts_root / req.cwd).expanduser().resolve()
+                    if not run_cwd.is_relative_to(settings.scripts_root.resolve()):
+                        results.append(
+                            {
+                                "script": s.path,
+                                "status": "error",
+                                "error": "Invalid cwd",
+                            }
+                        )
+                        continue
+                except Exception:
+                    results.append(
+                        {"script": s.path, "status": "error", "error": "Invalid cwd"}
+                    )
+                    continue
+
+            try:
+                record = await app.state.runner.start(
+                    script=s.path,
+                    absolute_script_path=absolute,
+                    args=req.args,
+                    env=req.env,
+                    cwd=run_cwd,
+                )
+                results.append(
+                    {"script": s.path, "status": "started", "run_id": record.run_id}
+                )
+            except Exception as e:
+                results.append({"script": s.path, "status": "error", "error": str(e)})
+
+        return {"count": len(results), "results": results}
+
+    @app.post(
+        f"{settings.api_prefix}/runs/stop_all", dependencies=[_auth({"scripts:run"})]
+    )
+    async def stop_all_runs() -> dict[str, Any]:
+        active_runs = await app.state.runner.list_active_runs()
+        results = []
+        for run in active_runs:
+            run_id = run["run_id"]
+            try:
+                record = await app.state.runner.stop(run_id)
+                status = record.status if record else "not_found"
+                results.append({"run_id": run_id, "status": status})
+            except Exception as e:
+                results.append({"run_id": run_id, "status": "error", "error": str(e)})
+
+        return {"count": len(results), "results": results}
 
     @app.get(
         f"{settings.api_prefix}/runs/{{run_id}}", dependencies=[_auth({"scripts:read"})]
