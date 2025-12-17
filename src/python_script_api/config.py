@@ -71,7 +71,7 @@ def load_settings(
     state_dir_raw = (
         str(state_dir)
         if state_dir is not None
-        else (_env("SCRIPT_STATE_DIR") or ".quant-script-api")
+        else (_env("SCRIPT_STATE_DIR") or ".python-script-api")
     )
     state_dir_path = Path(state_dir_raw).expanduser()
 

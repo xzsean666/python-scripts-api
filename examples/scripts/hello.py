@@ -6,7 +6,7 @@ import sys
 
 
 def main() -> None:
-    print("hello from quant-script-api demo script")
+    print("hello from python-script-api demo script")
     print("python:", sys.executable)
     print("cwd:", os.getcwd())
     print("argv:", sys.argv)
@@ -15,4 +15,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

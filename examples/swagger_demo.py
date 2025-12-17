@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> None:
 
     repo_root = Path(__file__).resolve().parents[1]
     scripts_path = repo_root / "examples" / "scripts"
-    state_dir = repo_root / ".quant-script-api"
+    state_dir = repo_root / ".python-script-api"
 
     env = os.environ.copy()
     src_dir = repo_root / "src"
@@ -96,13 +96,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.auth:
         env["SCRIPT_JWT_SECRET"] = demo_jwt_secret
         env["SCRIPT_JWT_ADMIN_SECRET"] = demo_admin_secret
-        env.setdefault("SCRIPT_JWT_ISS", "quant-script-api")
+        env.setdefault("SCRIPT_JWT_ISS", "python-script-api")
         env.setdefault("SCRIPT_JWT_AUD", "quant-internal")
 
     cmd = [
         sys.executable,
         "-m",
-        "quant_script_api",
+        "python_script_api",
         "serve",
         "--scripts-path",
         str(scripts_path),
@@ -213,4 +213,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

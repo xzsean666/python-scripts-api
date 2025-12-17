@@ -3,7 +3,7 @@
 准备几个示例脚本在 `examples/scripts/`，启动服务：
 
 ```bash
-quant-script-api serve --scripts-path examples/scripts --reload
+python-script-api serve --scripts-path examples/scripts --reload
 ```
 
 也可以直接跑一个“一键启动 + 冒烟”的脚本（更适合配合 Swagger）：  

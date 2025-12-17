@@ -1,6 +1,6 @@
-## quant-script-api
+## python-script-api
 
-`quant-script-api` 是一个可安装的 Python 包，用于 **统一管理和执行 Python 脚本**。
+`python-script-api` 是一个可安装的 Python 包，用于 **统一管理和执行 Python 脚本**。
 它基于 **FastAPI + subprocess / asyncio** 实现，提供标准化的 **脚本执行 API** 与运行时管理能力，并且 **不侵入脚本本身**（脚本不需要 import runner）。
 
 ### 核心设计原则
@@ -14,40 +14,40 @@
 
 ```
 local test
-uv run quant-script-api serve --scripts-path examples/scripts
+uv run python-script-api serve --scripts-path examples/scripts
 
 uv add git+https://github.com/xzsean666/python-scripts-api.git
 
-uv run quant-script-api serve --scripts-path ./scripts
+uv run python-script-api serve --scripts-path ./scripts
 ```
 
 安装：
 
 ```bash
-pip install quant-script-api
+pip install python-script-api
 ```
 
 从 GitHub 安装（适合未发布 PyPI 的场景）：
 
 ```bash
 # 安装为项目依赖（写入 pyproject.toml）
-uv add "quant-script-api @ git+https://github.com/<OWNER>/<REPO>.git"
+uv add "python-script-api @ git+https://github.com/<OWNER>/<REPO>.git"
 
 # 或安装为全局工具（推荐用来跑服务）
-uv tool install "quant-script-api @ git+https://github.com/<OWNER>/<REPO>.git"
+uv tool install "python-script-api @ git+https://github.com/<OWNER>/<REPO>.git"
 ```
 
 固定到 tag / commit：
 
 ```bash
-uv add "quant-script-api @ git+https://github.com/<OWNER>/<REPO>.git@v0.1.0"
+uv add "python-script-api @ git+https://github.com/<OWNER>/<REPO>.git@v0.1.0"
 # 或 @<commit_sha>
 ```
 
 启动（指定脚本目录）：
 
 ```bash
-quant-script-api serve --scripts-path strategies/binances
+python-script-api serve --scripts-path strategies/binances
 ```
 
 也可以通过环境变量指定脚本目录（CLI 参数优先级更高）：
@@ -78,7 +78,7 @@ SCRIPT_SCRIPTS_PATH=strategies/binances
 
 - 运行命令：`sys.executable -u <script.py> ...`（与 Runner 共享同一 Python 环境）
 - 默认工作目录：`--scripts-path` 指定的目录（可在 `POST /v1/runs` 中用 `cwd` 覆盖，且必须在 scripts root 下）
-- 日志目录：默认 `.quant-script-api/logs/`
+- 日志目录：默认 `.python-script-api/logs/`
   - stdout：`<run_id>.stdout.log`
   - stderr：`<run_id>.stderr.log`
   - 可用 `SCRIPT_STATE_DIR` / `SCRIPT_LOGS_DIR` 覆盖
@@ -90,7 +90,7 @@ SCRIPT_SCRIPTS_PATH=strategies/binances
 ```env
 SCRIPT_JWT_AUTH=true
 SCRIPT_JWT_SECRET=change_me
-SCRIPT_JWT_ISS=quant-script-api
+SCRIPT_JWT_ISS=python-script-api
 SCRIPT_JWT_AUD=quant-internal
 SCRIPT_JWT_EXPIRE_SECONDS=3600
 ```
@@ -112,7 +112,7 @@ Scope 约定（最小集合）：
 
 ```json
 {
-  "iss": "quant-script-api",
+  "iss": "python-script-api",
   "aud": "quant-internal",
   "sub": "user_12345",
   "type": "user",
@@ -174,4 +174,4 @@ curl -sS "http://127.0.0.1:8000/v1/runs/<run_id>/logs?stream=both&tail_bytes=655
 - 不管理 Python 依赖、不做环境隔离
 - 不耦合业务逻辑、不要求脚本遵循特定框架
 
-一句话定位：`quant-script-api` 是一个“Python 脚本运行时控制平面”，而不是脚本本身的一部分。
+一句话定位：`python-script-api` 是一个“Python 脚本运行时控制平面”，而不是脚本本身的一部分。

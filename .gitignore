@@ -145,8 +145,8 @@ ENV/
 env.bak/
 venv.bak/
 
-# quant-script-api state
-.quant-script-api/
+# python-script-api state
+.python-script-api/
 
 # Spyder project settings
 .spyderproject

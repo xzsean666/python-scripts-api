@@ -48,7 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
 
     app = FastAPI(
-        title="quant-script-api",
+        title="python-script-api",
         version=__version__,
         description="A small control plane to run Python scripts via REST APIs.",
     )

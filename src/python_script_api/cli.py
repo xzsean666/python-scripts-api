@@ -13,7 +13,7 @@ from .dotenv import load_dotenv
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="quant-script-api")
+    parser = argparse.ArgumentParser(prog="python-script-api")
     parser.add_argument("--version", action="version", version=__version__)
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> None:
         os.environ["SCRIPT_API_PREFIX"] = settings.api_prefix
 
         uvicorn.run(
-            "quant_script_api.app:app",
+            "python_script_api.app:app",
             host=settings.host,
             port=settings.port,
             reload=bool(args.reload),

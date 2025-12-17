@@ -1,5 +1,5 @@
 [project]
-name = "quant-script-api"
+name = "python-script-api"
 version = "0.1.0"
 description = "FastAPI-based control plane to manage and run Python scripts via REST APIs."
 readme = "README.md"
@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-quant-script-api = "quant_script_api.cli:main"
+python-script-api = "python_script_api.cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
