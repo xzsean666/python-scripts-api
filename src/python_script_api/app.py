@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from . import __version__
@@ -51,6 +52,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="python-script-api",
         version=__version__,
         description="A small control plane to run Python scripts via REST APIs.",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     app.state.settings = settings
