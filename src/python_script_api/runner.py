@@ -35,6 +35,7 @@ class RunRecord:
     _process: asyncio.subprocess.Process | None = None
     _stdout_file: Any | None = None
     _stderr_file: Any | None = None
+    _log_tasks: list[asyncio.Task] | None = None
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -98,6 +99,7 @@ class RunManager:
             conn.commit()
 
     def _load_runs(self) -> None:
+        records_to_update = []
         with sqlite3.connect(self._db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM runs")
@@ -134,7 +136,7 @@ class RunManager:
                             if record.error
                             else "Server restarted and process not found"
                         )
-                        self._save_run_sync(record)
+                        records_to_update.append(record)
                 elif record.status in ("starting", "running", "stopping"):
                     # No PID recorded, mark as terminated
                     record.status = "terminated"
@@ -145,9 +147,12 @@ class RunManager:
                         if record.error
                         else "Server restarted"
                     )
-                    self._save_run_sync(record)
+                    records_to_update.append(record)
 
                 self._runs[record.run_id] = record
+
+        for record in records_to_update:
+            self._save_run_sync(record)
 
     def _is_process_alive(self, pid: int) -> bool:
         try:
@@ -197,6 +202,17 @@ class RunManager:
                 ),
             )
             conn.commit()
+
+    async def _pipe_stream(self, stream: asyncio.StreamReader, *files: Any) -> None:
+        while True:
+            data = await stream.read(65536)
+            if not data:
+                break
+            for f in files:
+                try:
+                    f.write(data)
+                except Exception:
+                    pass
 
     async def start(
         self,
@@ -250,11 +266,12 @@ class RunManager:
                 env=full_env,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=stdout_file,
-                stderr=stderr_file,
+                stderr=asyncio.subprocess.PIPE,
                 start_new_session=(os.name != "nt"),
             )
         except Exception as e:
             stdout_file.close()
+            stderr_file.close()
             async with self._lock:
                 record.status = "failed"
                 record.error = str(e)
@@ -262,10 +279,17 @@ class RunManager:
             self._save_run_sync(record)
             return record
 
+        log_tasks = [
+            asyncio.create_task(
+                self._pipe_stream(proc.stderr, stdout_file, stderr_file)
+            ),
+        ]
+
         async with self._lock:
             record._process = proc
             record._stdout_file = stdout_file
             record._stderr_file = stderr_file
+            record._log_tasks = log_tasks
             record.pid = proc.pid
             record.status = "running"
             record.started_at = _utc_now()
@@ -291,6 +315,9 @@ class RunManager:
             self._save_run_sync(record)
             self._close_files(record)
             return
+
+        if record._log_tasks:
+            await asyncio.gather(*record._log_tasks, return_exceptions=True)
 
         async with self._lock:
             record.return_code = rc
