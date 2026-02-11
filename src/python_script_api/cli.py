@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import datetime
 import os
 import sys
 from pathlib import Path
@@ -65,9 +67,36 @@ def main(argv: list[str] | None = None) -> None:
         os.environ["SCRIPT_LOGS_DIR"] = str(settings.logs_dir)
         os.environ["SCRIPT_API_PREFIX"] = settings.api_prefix
 
+        today_str = datetime.date.today().isoformat()
+        settings.logs_dir.mkdir(parents=True, exist_ok=True)
+        log_file = settings.logs_dir / f"app-{today_str}.log"
+
+        from uvicorn.config import LOGGING_CONFIG
+
+        log_config = copy.deepcopy(LOGGING_CONFIG)
+        log_config["handlers"]["file"] = {
+            "class": "logging.FileHandler",
+            "filename": str(log_file),
+            "formatter": "default",
+            "encoding": "utf-8",
+        }
+
+        for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
+            if logger_name in log_config["loggers"]:
+                if "handlers" not in log_config["loggers"][logger_name]:
+                    log_config["loggers"][logger_name]["handlers"] = []
+                log_config["loggers"][logger_name]["handlers"].append("file")
+
+        log_config["loggers"]["python_script_api"] = {
+            "handlers": ["default", "file"],
+            "level": "INFO",
+            "propagate": False,
+        }
+
         uvicorn.run(
             "python_script_api.app:app",
             host=settings.host,
             port=settings.port,
             reload=bool(args.reload),
+            log_config=log_config,
         )

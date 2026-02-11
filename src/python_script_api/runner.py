@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import sqlite3
 import sys
 import uuid
 from typing import Any
+
+ANSI_ESCAPE_BYTES = re.compile(rb'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
 def _utc_now() -> str:
@@ -63,6 +67,7 @@ class RunManager:
         logs_dir: Path,
         state_dir: Path,
         terminate_timeout_seconds: int = 10,
+        on_completion: Any | None = None,
     ):
         self._scripts_root = scripts_root.expanduser().resolve()
         self._logs_dir = logs_dir.expanduser()
@@ -70,6 +75,7 @@ class RunManager:
         self._terminate_timeout_seconds = max(1, int(terminate_timeout_seconds))
         self._runs: dict[str, RunRecord] = {}
         self._lock = asyncio.Lock()
+        self._on_completion = on_completion
 
         self._state_dir.mkdir(parents=True, exist_ok=True)
         self._db_path = self._state_dir / "runs.db"
@@ -208,6 +214,10 @@ class RunManager:
             data = await stream.read(65536)
             if not data:
                 break
+
+            # Filter ANSI escape bytes
+            data = ANSI_ESCAPE_BYTES.sub(b"", data)
+
             for f in files:
                 try:
                     f.write(data)
@@ -265,7 +275,7 @@ class RunManager:
                 cwd=str(run_cwd),
                 env=full_env,
                 stdin=asyncio.subprocess.DEVNULL,
-                stdout=stdout_file,
+                stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=(os.name != "nt"),
             )
@@ -280,6 +290,9 @@ class RunManager:
             return record
 
         log_tasks = [
+            asyncio.create_task(
+                self._pipe_stream(proc.stdout, stdout_file)
+            ),
             asyncio.create_task(
                 self._pipe_stream(proc.stderr, stdout_file, stderr_file)
             ),
@@ -314,6 +327,11 @@ class RunManager:
                 record.finished_at = _utc_now()
             self._save_run_sync(record)
             self._close_files(record)
+            if self._on_completion:
+                try:
+                    await self._on_completion(record)
+                except Exception:
+                    pass
             return
 
         if record._log_tasks:
@@ -330,6 +348,12 @@ class RunManager:
                 record.status = "failed"
         self._save_run_sync(record)
         self._close_files(record)
+
+        if self._on_completion:
+            try:
+                await self._on_completion(record)
+            except Exception:
+                pass
 
     def _close_files(self, record: RunRecord) -> None:
         for f in (record._stdout_file, record._stderr_file):
@@ -446,32 +470,27 @@ class RunManager:
         return record
 
     async def read_logs(
-        self, run_id: str, *, stream: str = "stdout", tail_bytes: int = 65536
+        self, run_id: str, *, stream: str = "stdout", tail_lines: int = 1000
     ) -> dict[str, str] | None:
         record = await self.get(run_id)
         if record is None:
             return None
 
-        tail_bytes = max(0, int(tail_bytes))
+        tail_lines = max(0, int(tail_lines))
         result: dict[str, str] = {}
 
         if stream in {"stdout", "both"}:
-            result["stdout"] = _tail_text_file(record.stdout_path, tail_bytes)
+            result["stdout"] = _tail_lines(record.stdout_path, tail_lines)
         if stream in {"stderr", "both"}:
-            result["stderr"] = _tail_text_file(record.stderr_path, tail_bytes)
+            result["stderr"] = _tail_lines(record.stderr_path, tail_lines)
         return result
 
 
-def _tail_text_file(path: Path, tail_bytes: int) -> str:
+def _tail_lines(path: Path, lines: int) -> str:
     try:
         if not path.exists():
             return ""
-        with open(path, "rb") as f:
-            if tail_bytes > 0:
-                f.seek(0, os.SEEK_END)
-                size = f.tell()
-                f.seek(max(0, size - tail_bytes))
-            data = f.read()
-        return data.decode("utf-8", errors="replace")
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return "".join(deque(f, lines))
     except Exception:
         return ""

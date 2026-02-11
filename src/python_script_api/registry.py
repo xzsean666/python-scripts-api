@@ -22,7 +22,7 @@ def _should_ignore_path(path: Path, root: Path) -> bool:
     return False
 
 
-def scan_scripts(root: Path) -> list[ScriptInfo]:
+def scan_scripts(root: Path, max_depth: int | None = None) -> list[ScriptInfo]:
     resolved_root = root.expanduser().resolve()
     if not resolved_root.exists() or not resolved_root.is_dir():
         return []
@@ -31,6 +31,13 @@ def scan_scripts(root: Path) -> list[ScriptInfo]:
     for candidate in resolved_root.rglob("*.py"):
         if not candidate.is_file():
             continue
+
+        rel_path = candidate.relative_to(resolved_root)
+        if max_depth is not None:
+            current_depth = len(rel_path.parts) - 1
+            if current_depth > max_depth:
+                continue
+
         if _should_ignore_path(candidate, resolved_root):
             continue
         if candidate.name.startswith("_"):
@@ -38,7 +45,7 @@ def scan_scripts(root: Path) -> list[ScriptInfo]:
         stat = candidate.stat()
         scripts.append(
             ScriptInfo(
-                path=candidate.relative_to(resolved_root).as_posix(),
+                path=rel_path.as_posix(),
                 absolute_path=candidate,
                 size_bytes=stat.st_size,
                 mtime=stat.st_mtime,

@@ -61,26 +61,58 @@ SCRIPT_SCRIPTS_PATH=strategies/binances
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - OpenAPI: `http://127.0.0.1:8000/openapi.json`
 
-### API（最小列表）
+### 功能特性
+
+- 通过 REST API 启动、停止、查询 Python 脚本
+- SQLite 持久化运行状态，服务重启后自动恢复
+- 自动过滤 ANSI 转义码，日志输出干净
+- stdout 和 stderr 合并到 stdout 日志，同时 stderr 单独保留
+- WebSocket 实时日志流
+- 脚本上传接口
+- Docker 容器 / 宿主机系统资源监控（CPU、内存）
+- 文件日志（uvicorn + 应用日志写入 `logs/app-{date}.log`）
+- `on_completion` 回调机制（脚本执行完成后触发自定义逻辑）
+- `scan_scripts` 支持 `max_depth` 参数控制扫描深度
+- 可选 JWT 鉴权（HS256 / scope-based）
+
+### API
 
 默认前缀为 `/v1`（可通过 `SCRIPT_API_PREFIX` 配置）：
 
+**基础**
 - `GET /v1/health`：健康检查
+
+**脚本管理**
 - `GET /v1/scripts`：扫描结果（脚本列表）
-- `POST /v1/scripts/rescan`：重新扫描脚本目录
+- `POST /v1/scripts/rescan?max_depth=N`：重新扫描脚本目录（可选 max_depth 参数）
+- `POST /v1/scripts/upload`：上传脚本文件（multipart form: file, file_name, file_path）
+
+**运行管理**
 - `POST /v1/runs`：启动脚本
 - `GET /v1/runs`：运行列表
+- `GET /v1/runs/active`：活跃运行列表
+- `POST /v1/runs/all`：批量启动所有脚本
+- `POST /v1/runs/stop_all`：停止所有运行中的脚本
 - `GET /v1/runs/{run_id}`：运行详情/状态
 - `POST /v1/runs/{run_id}/stop`：停止运行
-- `GET /v1/runs/{run_id}/logs`：读取日志（stdout/stderr）
+- `GET /v1/runs/{run_id}/logs?stream=stdout&tail_lines=1000`：读取日志
+- `WS /v1/runs/{run_id}/logs/stream`：WebSocket 实时日志流
+
+**系统监控**
+- `GET /v1/docker/metrics`：Docker 容器资源使用（cgroup v2）
+- `GET /v1/system/metrics`：宿主机系统资源使用（/proc）
+
+**鉴权**
+- `POST /v1/auth/admin/token`：管理员 secret 换取 JWT token
 
 ### 运行与日志规范（默认）
 
 - 运行命令：`sys.executable -u <script.py> ...`（与 Runner 共享同一 Python 环境）
 - 默认工作目录：`--scripts-path` 指定的目录（可在 `POST /v1/runs` 中用 `cwd` 覆盖，且必须在 scripts root 下）
-- 日志目录：默认 `.python-script-api/logs/`
-  - stdout：`<run_id>.stdout.log`
-  - stderr：`<run_id>.stderr.log`
+- 日志目录：默认 `logs/`
+  - stdout：`<run_id>.stdout.log`（包含 stdout + stderr 合并输出，已过滤 ANSI 转义码）
+  - stderr：`<run_id>.stderr.log`（仅 stderr）
+  - 应用日志：`app-{date}.log`（uvicorn + 应用运行日志）
   - 可用 `SCRIPT_STATE_DIR` / `SCRIPT_LOGS_DIR` 覆盖
 
 ### 可选鉴权（JWT）
@@ -104,6 +136,7 @@ Scope 约定（最小集合）：
 
 - 读脚本/运行状态：`scripts:read`
 - 启动/停止脚本：`scripts:run`
+- 上传脚本：`scripts:write`
 - 读日志：`logs:read`
 
 #### 人类用户 Token（示例）
@@ -117,7 +150,7 @@ Scope 约定（最小集合）：
   "sub": "user_12345",
   "type": "user",
   "role": "operator",
-  "scopes": ["scripts:read", "scripts:run", "logs:read"],
+  "scopes": ["scripts:read", "scripts:run", "scripts:write", "logs:read"],
   "iat": 1736840000,
   "exp": 1736843600,
   "jti": "c2c4b1c2-0a1d-4b8a-9d34-9f92caa11111"
@@ -126,7 +159,7 @@ Scope 约定（最小集合）：
 
 #### 管理员 Secret 换取 Bearer Token
 
-如果设置了 `SCRIPT_JWT_ADMIN_SECRET`，则开放一个简单的“管理员 Secret → Token”接口：
+如果设置了 `SCRIPT_JWT_ADMIN_SECRET`，则开放一个简单的"管理员 Secret -> Token"接口：
 
 ```env
 SCRIPT_JWT_ADMIN_SECRET=change_me_too
@@ -166,7 +199,26 @@ curl -sS -X POST http://127.0.0.1:8000/v1/runs \
 读取日志（默认 stdout，支持 `stream=stderr|both`）：
 
 ```bash
-curl -sS "http://127.0.0.1:8000/v1/runs/<run_id>/logs?stream=both&tail_bytes=65536"
+curl -sS "http://127.0.0.1:8000/v1/runs/<run_id>/logs?stream=both&tail_lines=1000"
+```
+
+上传脚本：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/v1/scripts/upload \
+  -F "file=@my_script.py" \
+  -F "file_name=my_script.py" \
+  -F "file_path=subdir"
+```
+
+WebSocket 实时日志：
+
+```javascript
+const ws = new WebSocket("ws://127.0.0.1:8000/v1/runs/<run_id>/logs/stream");
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  console.log(`[${msg.stream}] ${msg.data}`);
+};
 ```
 
 ### 不包含的职责（刻意不做）
@@ -174,4 +226,4 @@ curl -sS "http://127.0.0.1:8000/v1/runs/<run_id>/logs?stream=both&tail_bytes=655
 - 不管理 Python 依赖、不做环境隔离
 - 不耦合业务逻辑、不要求脚本遵循特定框架
 
-一句话定位：`python-script-api` 是一个“Python 脚本运行时控制平面”，而不是脚本本身的一部分。
+一句话定位：`python-script-api` 是一个"Python 脚本运行时控制平面"，而不是脚本本身的一部分。

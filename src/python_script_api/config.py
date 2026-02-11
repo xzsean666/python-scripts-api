@@ -41,7 +41,6 @@ class Settings:
     jwt_auth: bool
     jwt_secret: str | None
     jwt_iss: str | None
-    jwt_iss: str | None
     jwt_aud: str | None
     jwt_leeway_seconds: int
     jwt_expire_seconds: int
